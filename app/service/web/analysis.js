@@ -83,9 +83,11 @@ class AnalysisService extends Service {
                 .exec()
         );
         const all = await Promise.all([ count, datas ]);
+        const [ totalNum, datalist ] = all;
+
         return {
-            datalist: all[1],
-            totalNum: all[0].length,
+            datalist,
+            totalNum: totalNum.length,
             pageNo,
         };
     }
@@ -95,7 +97,7 @@ class AnalysisService extends Service {
         return await this.app.models.WebEnvironment(appId)
             .find({ mark_user: markuser })
             .read('sp')
-            .sort({ cerate_time: 1 })
+            .sort({ create_time: 1 })
             .exec() || {};
     }
 
@@ -109,7 +111,7 @@ class AnalysisService extends Service {
             const browser = Promise.resolve(this.getRealTimeTopBrowser(appId, beginTime, endTime));
             const province = Promise.resolve(this.getRealTimeTopProvince(appId, beginTime, endTime));
             const all = await Promise.all([ pages, jump, browser, province ]);
-            result = { top_pages: all[0], top_jump_out: all[1], top_browser: all[2], province: all[3] };
+            result = { top_pages: all[0], top_jump_out: all[1], top_browser: all[2], provinces: all[3] };
         } else if (type === 2) {
             result = await this.getDbTopAnalysis(appId, beginTime, endTime) || {};
         }
@@ -216,9 +218,9 @@ class AnalysisService extends Service {
     }
 
     // top省市排行榜
-    async getRealTimeTopProvince(appId, beginTime, endTime) {
+    async getRealTimeTopProvince(appId, beginTime, endTime, type = 1) {
         let result = await this.app.redis.get(`${appId}_top_province_realtime`);
-        result = result ? JSON.parse(result) : await this.getRealTimeTopProvinceForDb(appId, beginTime, endTime);
+        result = (result && type === 1) ? JSON.parse(result) : await this.getRealTimeTopProvinceForDb(appId, beginTime, endTime, type);
         return result;
     }
     async getRealTimeTopProvinceForDb(appId, beginTime, endTime, type) {
@@ -261,23 +263,24 @@ class AnalysisService extends Service {
             if (type === 2) {
                 // 每天数据存储到数据库
                 const all = await Promise.all([ pages, jump, browser, province ]);
+                const [ toppages, topjumpout, topbrowser, provinces ] = all;
 
                 const statis = this.ctx.model.Web.WebStatis();
                 statis.app_id = appId;
-                statis.top_pages = all[0];
-                statis.top_jump_out = all[1];
-                statis.top_browser = all[2];
-                statis.provinces = all[3];
+                statis.top_pages = toppages;
+                statis.top_jump_out = topjumpout;
+                statis.top_browser = topbrowser;
+                statis.provinces = provinces;
                 statis.create_time = beginTime;
                 const result = await statis.save();
 
                 // 触发日报邮件
                 this.ctx.service.web.sendEmail.getDaliyDatas({
                     appId,
-                    toppages: all[0],
-                    topjumpout: all[1],
-                    topbrowser: all[2],
-                    provinces: all[3],
+                    toppages,
+                    topjumpout,
+                    topbrowser,
+                    provinces,
                 }, 'toplist');
 
                 return result;
@@ -292,18 +295,27 @@ class AnalysisService extends Service {
         const uvpro = Promise.resolve(this.ctx.service.web.pvuvip.uv(appId, query));
         const ippro = Promise.resolve(this.ctx.service.web.pvuvip.ip(appId, query));
         const ajpro = Promise.resolve(this.ctx.service.web.pvuvip.ajax(appId, query));
-        const data = await Promise.all([ pvpro, uvpro, ippro, ajpro ]);
+        const flpro = Promise.resolve(this.ctx.service.web.pvuvip.flow(appId, query));
+        const data = await Promise.all([ pvpro, uvpro, ippro, ajpro, flpro ]);
 
         const pv = data[0] || 0;
         const uv = data[1].length ? data[1][0].count : 0;
         const ip = data[2].length ? data[2][0].count : 0;
         const ajax = data[3] || 0;
-        this.app.redis.set(`${appId}_pv_uv_ip_realtime`, JSON.stringify({ pv, uv, ip, ajax }));
+        const flow = data[4] || 0;
+        this.app.redis.set(`${appId}_pv_uv_ip_realtime`, JSON.stringify({ pv, uv, ip, ajax, flow }));
     }
 
     // 省份流量统计
-    async getProvinceAvgCount(appId, beginTime, endTime) {
-        return { provinces: await this.getRealTimeTopProvince(appId, beginTime, endTime) || [] };
+    async getProvinceAvgCount(appId, beginTime, endTime, type) {
+        if (type) type = type * 1;
+        if (type === 1) {
+            let res = await this.app.redis.get(`${appId}_top_province_realtime`);
+            res = res ? JSON.parse(res) : await this.getRealTimeTopProvinceForDb(appId, beginTime, endTime);
+            return { provinces: res };
+        } else if (type === 2) {
+            return await this.getDbTopAnalysis(appId, beginTime, endTime);
+        }
     }
 }
 

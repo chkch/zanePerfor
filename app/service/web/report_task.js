@@ -6,7 +6,7 @@ const UAParser = require('ua-parser-js');
 const Service = require('egg').Service;
 const fs = require('fs');
 const path = require('path');
-class DataTimedTaskService extends Service {
+class ReportTaskService extends Service {
 
     constructor(params) {
         super(params);
@@ -128,6 +128,10 @@ class DataTimedTaskService extends Service {
                 const index = this.kafkalist.indexOf(msgtab);
                 if (index > -1) this.kafkalist.splice(index, 1);
             });
+        } else {
+            // 释放
+            const index = this.kafkalist.indexOf(msgtab);
+            if (index > -1) this.kafkalist.splice(index, 1);
         }
         if (system.is_statisi_resource === 0 || system.is_statisi_ajax === 0) this.forEachResources(item, system);
         if (system.is_statisi_error === 0) this.saveErrors(item);
@@ -207,8 +211,8 @@ class DataTimedTaskService extends Service {
                 time: item.create_time,
                 user_agent: item.user_agent,
                 ip: item.ip,
-                markPage: item.mark_page,
-                markUser: item.mark_user,
+                markPage: item.mark_page || '',
+                markUser: item.mark_user || '',
                 markUv: item.mark_uv,
                 url: item.url,
                 preUrl: item.pre_url,
@@ -238,8 +242,8 @@ class DataTimedTaskService extends Service {
             user_agent: query.user_agent,
             ip: query.ip,
             mark_page: query.markPage || this.app.randomString(),
-            mark_user: query.markUser,
-            mark_uv: query.markUv,
+            mark_user: query.markUser || '',
+            mark_uv: query.markUv || '',
             url: query.url,
         };
 
@@ -277,6 +281,19 @@ class DataTimedTaskService extends Service {
                 slowPageTime = slowPageTime * 1000;
                 const speedType = performance.lodt >= slowPageTime ? 2 : 1;
 
+                // 算出页面资源大小
+                let totalSize = 0;
+                const sourslist = item.resource_list || [];
+                for (let i = 0; i < sourslist.length; i++) {
+                    if (
+                        sourslist[i].decodedBodySize &&
+                        sourslist[i].type !== 'fetchrequest' &&
+                        sourslist[i].type !== 'xmlhttprequest'
+                    ) {
+                        totalSize += sourslist[i].decodedBodySize;
+                    }
+                }
+
                 pages.app_id = item.app_id;
                 pages.create_time = item.create_time;
                 pages.url = newName;
@@ -290,7 +307,8 @@ class DataTimedTaskService extends Service {
                 pages.dns_time = performance.dnst;
                 pages.tcp_time = performance.tcpt;
                 pages.dom_time = performance.domt;
-                pages.resource_list = item.resource_list;
+                pages.resource_list = sourslist;
+                pages.total_res_size = totalSize;
                 pages.white_time = performance.wit;
                 pages.redirect_time = performance.rdit;
                 pages.unload_time = performance.uodt;
@@ -487,4 +505,4 @@ class DataTimedTaskService extends Service {
     }
 }
 
-module.exports = DataTimedTaskService;
+module.exports = ReportTaskService;
